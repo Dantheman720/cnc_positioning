@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { invoke } from "@tauri-apps/api/core";
+
     interface RouterBit {
         id: string;
         name: string;
@@ -14,77 +16,40 @@
 
     interface Props {
         onSelect: (bit: RouterBit | null) => void;
-        selectedBitAction: RouterBit | null;  // Add selectedBit back as a prop
-
+        selectedBitAction: RouterBit | null;
     }
 
-    let {onSelect, selectedBitAction} = $props<Props>();
+    let {onSelect, selectedBitAction} = $props();
 
     let searchTerm = $state('');
     let viewingBit = $state<RouterBit | null>(null);
     let showOverlay = $state(false);
+    let routerBits = $state<RouterBit[]>([]);
+    let loading = $state(false);
+    let error = $state<string | null>(null);
 
-    const routerBits: RouterBit[] = [
-        {
-            id: "550e8400-e29b-41d4-a716-446655440000",
-            name: "Straight Bit 1/4\"",
-            type: "Straight",
-            diameter: 0.25,
-            material: "Carbide",
-            flutes: 2,
-            speedRange: "16000-24000 RPM",
-            feedRate: "100-150 IPM",
-            applicationTypes: ["Slots", "Dadoes", "Edge trimming"],
-            description: "General purpose straight cutting bit"
-        },
-        {
-            id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-            name: "V-Groove 60°",
-            type: "V-Groove",
-            diameter: 0.5,
-            material: "Carbide",
-            flutes: 2,
-            speedRange: "16000-22000 RPM",
-            feedRate: "80-120 IPM",
-            applicationTypes: ["V-carving", "Chamfering", "Decorative edges"],
-            description: "For V-carving and chamfering"
-        },
-        {
-            id: "550e8400-e29b-41d4-a716-446655440001",
-            name: "Ball Nose 1/8\"",
-            type: "Ball Nose",
-            diameter: 0.125,
-            material: "Carbide",
-            flutes: 2,
-            speedRange: "18000-24000 RPM",
-            feedRate: "60-100 IPM",
-            applicationTypes: ["3D carving", "Surfacing", "Rounded corners"],
-            description: "For 3D carving and surfacing"
-        }, {
-            id: "7f2c4a1b-8d5e-4c3f-9f6a-1d2b3e4f5a6b",
-            name: "Downcut Spiral 3/8\"",
-            type: "Downcut Spiral",
-            diameter: 0.375,
-            material: "Carbide",
-            flutes: 2,
-            speedRange: "16000-22000 RPM",
-            feedRate: "100-150 IPM",
-            applicationTypes: ["Clean top cuts", "Plywood", "Sheet goods", "No tearout cutting"],
-            description: "Downcut spiral for clean top surface and reduced tearout"
-        },
-        {
-            id: "9e8d7c6b-5a4f-3e2d-1c0b-9a8b7c6d5e4f",
-            name: "Compression 3/8\"",
-            type: "Compression",
-            diameter: 0.375,
-            material: "Carbide",
-            flutes: 2,
-            speedRange: "16000-22000 RPM",
-            feedRate: "100-150 IPM",
-            applicationTypes: ["Clean top and bottom cuts", "Sheet goods", "Melamine", "Plywood"],
-            description: "Compression spiral for clean cuts on both top and bottom surfaces"
+    async function fetchRouterBits() {
+        loading = true;
+        error = null;
+        try {
+            const bits = await invoke<RouterBit[]>('get_router_bits');
+            routerBits = bits.map(bit => ({
+                ...bit,
+                speedRange: bit.speedRange,
+                feedRate: bit.feedRate,
+                applicationTypes: bit.applicationTypes,
+            }));
+        } catch (err) {
+            error = err instanceof Error ? err.message : 'Failed to fetch router bits';
+            console.error("Failed to fetch router bits:", err);
+        } finally {
+            loading = false;
         }
-    ];
+    }
+
+    $effect(() => {
+        fetchRouterBits();
+    });
 
     let filteredBits = $derived(routerBits.filter(bit =>
         bit.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -118,6 +83,7 @@
     }
 </script>
 
+<!-- Rest of your template remains the same -->
 <div class="router-bit-selector">
     <button class="select-button" on:click={openSearch}>
         {selectedBitAction ? selectedBitAction.name : 'Select Router Bit'}
@@ -127,7 +93,6 @@
         <div class="overlay" on:click={closeOverlay}>
             <div class="overlay-content" on:click|stopPropagation>
                 {#if !viewingBit}
-                    <!-- Search List View -->
                     <div class="overlay-header">
                         <input
                                 type="text"
@@ -140,7 +105,14 @@
                     </div>
 
                     <div class="results-container">
-                        {#if filteredBits.length === 0}
+                        {#if loading}
+                            <div class="loading">Loading router bits...</div>
+                        {:else if error}
+                            <div class="error">
+                                {error}
+                                <button on:click={fetchRouterBits}>Retry</button>
+                            </div>
+                        {:else if filteredBits.length === 0}
                             <div class="no-results">No router bits found</div>
                         {:else}
                             {#each filteredBits as bit}
@@ -162,7 +134,6 @@
                         {/if}
                     </div>
                 {:else}
-                    <!-- Details View -->
                     <div class="details-view">
                         <div class="details-header">
                             <button class="back-button" on:click={backToList}>←</button>
@@ -218,6 +189,8 @@
         </div>
     {/if}
 </div>
+
+
 
 <style>
     .router-bit-selector {

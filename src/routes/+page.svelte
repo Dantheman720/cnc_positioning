@@ -3,9 +3,16 @@
     import PlywoodWidthInput from '../components/PlywoodWidthInput.svelte';
     import CncOptions from '../components/CncOptions.svelte';
     import {invoke} from "@tauri-apps/api/core";
+    import CreateRouterBit from '../components/CreateRouterBit.svelte';
+    import BitCoordinates from "../components/BitCoordinates.svelte";
 
-    type Tab = 'home' | 'coordinates';
+    type Tab = 'home' | 'coordinates' | 'create-bit';
     let currentTab = $state<Tab>('home');
+    function handleBitCreated() {
+        // Optionally refresh the router bit list in RouterBitSelector
+        // You might need to add a refresh method to RouterBitSelector
+        currentTab = 'home';
+    }
 
     interface RouterBit {
         id: string;
@@ -24,18 +31,8 @@
 
     let selectedBit = $state<RouterBit | null>(null);
     let width = $state('');
-    let calculateZero = $state(false);
-    let calculateHeight = $state(false);
 
-    function handleGenerateZero() {
-        generateGcode('zero');
-    }
-
-    function handleGenerateHeight() {
-        generateGcode('height');
-    }
-
-    async function generateGcode(type: 'zero' | 'height') {
+    async function handleGenerateZero() {
         if (!selectedBit || !width) {
             error = 'Please select a router bit and enter plywood thickness';
             return;
@@ -44,33 +41,75 @@
         error = null;
 
         try {
-            await invoke('write_positioning_file', {
+            await invoke('move_to_workpiece_zero', {
                 data: JSON.stringify({
                     router_bit: selectedBit,
                     plywood_thickness: parseFloat(width),
-                    calculate_workpiece_zero: type === 'zero',
-                    calculate_workpiece_height: type === 'height'
+                    calculate_workpiece_zero: true,
+                    calculate_workpiece_height: false
                 })
             });
         } catch (err) {
-            error = err instanceof Error ? err.message : 'Failed to generate G-code';
-            console.error("Failed to generate G-code:", err);
+            error = err instanceof Error ? err.message : 'Failed to generate Z coordinate G-code';
+            console.error("Failed to generate Z coordinate G-code:", err);
+        }
+    }
+
+    async function handleGenerateHeight() {
+        if (!selectedBit || !width) {
+            error = 'Please select a router bit and enter plywood thickness';
+            return;
+        }
+
+        error = null;
+
+        try {
+            await invoke('set_z_machine_coordinate', {
+                data: JSON.stringify({
+                    router_bit: selectedBit,
+                    plywood_thickness: parseFloat(width),
+                    calculate_workpiece_zero: false,
+                    calculate_workpiece_height: true
+                })
+            });
+        } catch (err) {
+            error = err instanceof Error ? err.message : 'Failed to generate height G-code';
+            console.error("Failed to generate height G-code:", err);
         }
     }
 </script>
 
 <main class="container">
-    <h1>CNC Position Selector</h1>
+        <h1>CNC Position Selector</h1>
 
-    <div class="tabs">
-        <a
-                class="tab-button"
-                onclick={() => currentTab = 'coordinates'}
-                href="/coordinates"
-        >
-            Bit Coordinates
-        </a>
-    </div>
+        <div class="tabs">
+            <a
+                    class="tab-button"
+                    class:active={currentTab === 'home'}
+                    onclick={() => currentTab = 'home'}
+                    href="#home"
+            >
+                Home
+            </a>
+            <a
+                    class="tab-button"
+                    class:active={currentTab === 'coordinates'}
+                    onclick={() => currentTab = 'coordinates'}
+                    href="#coordinates"
+            >
+                Bit Coordinates
+            </a>
+            <a
+                    class="tab-button"
+                    class:active={currentTab === 'create-bit'}
+                    onclick={() => currentTab = 'create-bit'}
+                    href="#create-bit"
+            >
+                Create Bit
+            </a>
+        </div>
+
+        {#if currentTab === 'home'}
 
     <div class="setup-form">
         <div class="form-section">
@@ -95,7 +134,13 @@
         </div>
 
     </div>
-</main>
+        {:else if currentTab === 'create-bit'}
+            <CreateRouterBit onSuccess={handleBitCreated} />
+        {:else}
+            <BitCoordinates/>
+        {/if}
+
+    </main>
 
 <style>
     .container {
