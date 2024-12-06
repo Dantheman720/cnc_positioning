@@ -339,6 +339,20 @@ async fn move_to_workpiece_zero(app_handle: AppHandle, data: &str) -> Result<(),
 
     generator.write_gcode("SET_ZERO_LOCATION.TAP", gcode)
 }
+#[tauri::command]
+async fn move_to_spoilboard_zero(app_handle: AppHandle, data: &str) -> Result<(), String> {
+    let generator = GCodeGenerator::new(app_handle, data).await?;
+
+    let gcode = format!(
+        "( Move to spoilboard zero position )\n\n{}\
+         ( Move to machine coordinates )\n\
+         G53 G0 X0.7234 Y1.0276 ; Rapid move to machine coordinates\n\n\
+         M30 ; End of program\n",
+        generator.generate_common_header()
+    );
+
+    generator.write_gcode("MOVE_TO_SPOILBOARD_ZERO.TAP", gcode)
+}
 
 #[tauri::command]
 async fn set_z_machine_coordinate(app_handle: AppHandle, data: &str) -> Result<(), String> {
@@ -436,7 +450,8 @@ pub fn run() {
             move_to_workpiece_zero,
             set_z_machine_coordinate,
             create_router_bit,
-            get_router_bits
+            get_router_bits,
+            move_to_spoilboard_zero
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

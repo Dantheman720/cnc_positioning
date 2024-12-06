@@ -2,9 +2,10 @@
     interface Props {
         onGenerateZero: () => void;
         onGenerateHeight: () => void;
+        onMoveToSpoilboardZero: () => void;
     }
 
-    let { onGenerateZero, onGenerateHeight } = $props();
+    let { onGenerateZero, onGenerateHeight, onMoveToSpoilboardZero } = $props();
 </script>
 
 <div class="actions-container">
@@ -20,6 +21,13 @@
             onclick={onGenerateHeight}
     >
         Calculate Workpiece Height
+    </button>
+
+    <button
+            class="action-button"
+            onclick={onMoveToSpoilboardZero}
+    >
+        Move to Spoilboard Zero
     </button>
 </div>
 
