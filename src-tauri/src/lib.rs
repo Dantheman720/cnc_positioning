@@ -1,11 +1,15 @@
-use std::path::PathBuf;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use csv::{Reader, Writer};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
+
+use rusqlite::Result;
+
+mod db;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RouterBit {
     pub id: Uuid,
@@ -442,6 +446,10 @@ async fn modify_bit_coordinates(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            db::initialize_db(&app.handle())?;
+            Ok(())
+        })
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
