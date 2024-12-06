@@ -25,8 +25,8 @@ pub struct CreateRouterBitRequest {
 
 #[tauri::command]
 async fn create_router_bit(app_handle: AppHandle, data: &str) -> Result<RouterBit, String> {
-    let request: CreateRouterBitRequest = serde_json::from_str(data)
-        .map_err(|e| format!("Failed to parse request: {}", e))?;
+    let request: CreateRouterBitRequest =
+        serde_json::from_str(data).map_err(|e| format!("Failed to parse request: {}", e))?;
 
     // Create new router bit with generated UUID
     let new_bit = RouterBit {
@@ -48,19 +48,21 @@ async fn create_router_bit(app_handle: AppHandle, data: &str) -> Result<RouterBi
     bits.push(new_bit.clone());
 
     // Open file for writing (this will overwrite the file)
-    let file = File::create(&file_path)
-        .map_err(|e| format!("Failed to open router bits file: {}", e))?;
+    let file =
+        File::create(&file_path).map_err(|e| format!("Failed to open router bits file: {}", e))?;
 
     // Create CSV writer
     let mut writer = Writer::from_writer(file);
 
     // Write all bits including the new one
     for bit in bits {
-        writer.serialize(&bit)
+        writer
+            .serialize(&bit)
             .map_err(|e| format!("Failed to write router bit: {}", e))?;
     }
 
-    writer.flush()
+    writer
+        .flush()
         .map_err(|e| format!("Failed to flush writer: {}", e))?;
 
     Ok(new_bit)
@@ -90,8 +92,8 @@ async fn get_router_bits(app_handle: AppHandle) -> Result<Vec<RouterBit>, String
     }
 
     // Now read from router_bits.csv
-    let file = File::open(&file_path)
-        .map_err(|e| format!("Failed to open router bits file: {}", e))?;
+    let file =
+        File::open(&file_path).map_err(|e| format!("Failed to open router bits file: {}", e))?;
 
     let mut reader = Reader::from_reader(file);
     let mut bits = Vec::new();
@@ -121,7 +123,47 @@ struct BitCoordinates {
     z: f64,
 }
 
+impl BitCoordinates {
+    pub fn get_bit_id(&self) -> &str {
+        &self.bit_id
+    }
 
+    pub fn set_bit_id(&mut self, bit_id: String) {
+        self.bit_id = bit_id;
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    pub fn get_x(&self) -> f64 {
+        self.x
+    }
+
+    pub fn set_x(&mut self, x: f64) {
+        self.x = x;
+    }
+
+    pub fn get_y(&self) -> f64 {
+        self.y
+    }
+
+    pub fn set_y(&mut self, y: f64) {
+        self.y = y;
+    }
+
+    pub fn get_z(&self) -> f64 {
+        self.z
+    }
+
+    pub fn set_z(&mut self, z: f64) {
+        self.z = z;
+    }
+}
 
 fn find_coordinates(bit_id: Uuid, coordinates_path: &str) -> Result<BitCoordinates, String> {
     let file = File::open(coordinates_path)
@@ -221,6 +263,9 @@ struct GCodeGenerator {
     app_handle: AppHandle,
     coordinates: BitCoordinates,
     coordinates_path: String,
+    plywood_thickness: f64,
+    calculate_workpiece_zero: bool,
+    calculate_workpiece_height: bool,
 }
 
 impl GCodeGenerator {
@@ -237,12 +282,20 @@ impl GCodeGenerator {
         let request: GenerateRequest = serde_json::from_str(data).map_err(|e| e.to_string())?;
         println!("Received request: {:?}", request);
 
-        let coordinates = find_coordinates(request.router_bit.id, &coordinates_path)?;
+        let mut coordinates = find_coordinates(request.router_bit.id, &coordinates_path)?;
+
+        // Apply offset based on plywood thickness when calculating workpiece zero
+        if request.calculate_workpiece_zero {
+            coordinates.set_z(coordinates.get_z() - request.plywood_thickness);
+        }
 
         Ok(Self {
             app_handle,
             coordinates,
             coordinates_path,
+            plywood_thickness: request.plywood_thickness,
+            calculate_workpiece_zero: request.calculate_workpiece_zero,
+            calculate_workpiece_height: request.calculate_workpiece_height,
         })
     }
 
@@ -265,7 +318,6 @@ impl GCodeGenerator {
         Ok(())
     }
 }
-
 #[tauri::command]
 async fn move_to_workpiece_zero(app_handle: AppHandle, data: &str) -> Result<(), String> {
     let generator = GCodeGenerator::new(app_handle, data).await?;
@@ -292,14 +344,23 @@ async fn move_to_workpiece_zero(app_handle: AppHandle, data: &str) -> Result<(),
 async fn set_z_machine_coordinate(app_handle: AppHandle, data: &str) -> Result<(), String> {
     let generator = GCodeGenerator::new(app_handle, data).await?;
 
+    // Calculate Z coordinate based on workpiece height
+    let z_coordinate = if generator.calculate_workpiece_height {
+        generator.coordinates.get_z() + generator.plywood_thickness + 2.0
+    } else {
+        generator.coordinates.get_z()
+    };
+
     let gcode = format!(
-        "( Move Z axis to workpiece zero position in machine coordinates )\n\n{}\
+        "( Move to workpiece position and then Z machine coordinate )\n\n{}\
+         ( Move to workpiece X=3, Y=3 )\n\
+         G0 X3 Y3 ; Rapid move to workpiece position\n\n\
          ( Move to Z{} in machine coordinates )\n\
          G53 G0 Z{} ; Rapid move to new Z in machine coordinates\n\n\
          M30 ; End of program\n",
         generator.generate_common_header(),
-        generator.coordinates.z,
-        generator.coordinates.z
+        z_coordinate,
+        z_coordinate
     );
 
     generator.write_gcode("SET_Z_MACHINE_COORDINATE.TAP", gcode)
