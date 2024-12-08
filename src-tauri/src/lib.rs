@@ -6,7 +6,7 @@ use std::fs::File;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-use rusqlite::Result;
+use rusqlite::{params, Result};
 
 mod db;
 
@@ -29,10 +29,9 @@ pub struct CreateRouterBitRequest {
 
 #[tauri::command]
 async fn create_router_bit(app_handle: AppHandle, data: &str) -> Result<RouterBit, String> {
-    let request: CreateRouterBitRequest =
-        serde_json::from_str(data).map_err(|e| format!("Failed to parse request: {}", e))?;
+    let request: CreateRouterBitRequest = serde_json::from_str(data)
+        .map_err(|e| format!("Failed to parse request: {}", e))?;
 
-    // Create new router bit with generated UUID
     let new_bit = RouterBit {
         id: Uuid::new_v4(),
         name: request.name,
@@ -41,71 +40,43 @@ async fn create_router_bit(app_handle: AppHandle, data: &str) -> Result<RouterBi
         description: request.description,
     };
 
-    // Get path to router_bits.csv
-    let app_dir = app_handle.path().app_local_data_dir().unwrap();
-    let file_path = app_dir.join("router_bits.csv");
+    let conn = db::get_db(&app_handle)
+        .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
-    // Read existing router bits
-    let mut bits = get_router_bits(app_handle.clone()).await?;
-
-    // Add new bit
-    bits.push(new_bit.clone());
-
-    // Open file for writing (this will overwrite the file)
-    let file =
-        File::create(&file_path).map_err(|e| format!("Failed to open router bits file: {}", e))?;
-
-    // Create CSV writer
-    let mut writer = Writer::from_writer(file);
-
-    // Write all bits including the new one
-    for bit in bits {
-        writer
-            .serialize(&bit)
-            .map_err(|e| format!("Failed to write router bit: {}", e))?;
-    }
-
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush writer: {}", e))?;
+    conn.execute(
+        "INSERT INTO router_bits (id, name, type, diameter, description) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            new_bit.id.to_string(),
+            new_bit.name,
+            new_bit.r#type,
+            new_bit.diameter,
+            new_bit.description
+        ],
+    )
+        .map_err(|e| format!("Failed to insert router bit: {}", e))?;
 
     Ok(new_bit)
 }
 #[tauri::command]
 async fn get_router_bits(app_handle: AppHandle) -> Result<Vec<RouterBit>, String> {
-    let app_dir = app_handle.path().app_local_data_dir().unwrap();
-    let file_path = app_dir.join("router_bits.csv");
+    let conn = db::get_db(&app_handle)
+        .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
-    // If router_bits.csv doesn't exist, copy from default-bits.csv
-    if !file_path.exists() {
-        // Create directory if it doesn't exist
-        if !app_dir.exists() {
-            std::fs::create_dir_all(&app_dir)
-                .map_err(|e| format!("Failed to create app directory: {}", e))?;
-        }
+    let mut stmt = conn.prepare("SELECT id, name, type, diameter, description FROM router_bits")
+        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        // Copy default-bits.csv to router_bits.csv
-        let current_dir = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        let default_file = current_dir.join("default-bits.csv");
-        dbg!(&default_file);
-
-        // Copy default-bits.csv to router_bits.csv
-        std::fs::copy(&default_file, &file_path)
-            .map_err(|e| format!("Failed to copy default bits file: {}", e))?;
-    }
-
-    // Now read from router_bits.csv
-    let file =
-        File::open(&file_path).map_err(|e| format!("Failed to open router bits file: {}", e))?;
-
-    let mut reader = Reader::from_reader(file);
-    let mut bits = Vec::new();
-
-    for result in reader.deserialize() {
-        let bit: RouterBit = result.map_err(|e| format!("Failed to parse CSV record: {}", e))?;
-        bits.push(bit);
-    }
+    let bits = stmt.query_map([], |row| {
+        Ok(RouterBit {
+            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+            name: row.get(1)?,
+            r#type: row.get(2)?,
+            diameter: row.get(3)?,
+            description: row.get(4)?,
+        })
+    })
+        .map_err(|e| format!("Failed to query router bits: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect router bits: {}", e))?;
 
     Ok(bits)
 }
@@ -385,64 +356,41 @@ async fn set_z_machine_coordinate(app_handle: AppHandle, data: &str) -> Result<(
 }
 #[tauri::command]
 async fn get_bit_coordinates(app_handle: AppHandle) -> Result<Vec<BitCoordinates>, String> {
-    let app_dir = app_handle.path().app_local_data_dir().unwrap();
-    let file_path = app_dir.join("bit_coordinates.csv");
+    let conn = db::get_db(&app_handle)
+        .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
-    let file =
-        File::open(&file_path).map_err(|e| format!("Failed to open coordinates file: {}", e))?;
+    let mut stmt = conn.prepare("SELECT bit_id, name, x, y, z FROM bit_coordinates")
+        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-    let mut reader = Reader::from_reader(file);
-    let mut coordinates = Vec::new();
+    let coords = stmt.query_map([], |row| {
+        Ok(BitCoordinates {
+            bit_id: row.get(0)?,
+            name: row.get(1)?,
+            x: row.get(2)?,
+            y: row.get(3)?,
+            z: row.get(4)?,
+        })
+    })
+        .map_err(|e| format!("Failed to query coordinates: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect coordinates: {}", e))?;
 
-    for result in reader.deserialize() {
-        let record: BitCoordinates =
-            result.map_err(|e| format!("Failed to parse CSV record: {}", e))?;
-        coordinates.push(record);
-    }
-
-    Ok(coordinates)
+    Ok(coords)
 }
 
 #[tauri::command]
-async fn modify_bit_coordinates(
-    app_handle: AppHandle,
-    coordinate: BitCoordinates,
-) -> Result<(), String> {
-    let app_dir = app_handle.path().app_local_data_dir().unwrap();
-    let file_path = app_dir.join("bit_coordinates.csv");
+async fn modify_bit_coordinates(app_handle: AppHandle, coordinate: BitCoordinates) -> Result<(), String> {
+    let conn = db::get_db(&app_handle)
+        .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
-    // Read all coordinates
-    let mut coordinates = get_bit_coordinates(app_handle.clone()).await?;
-
-    // Update the matching coordinate
-    if let Some(coord) = coordinates
-        .iter_mut()
-        .find(|c| c.bit_id == coordinate.bit_id)
-    {
-        coord.x = coordinate.x;
-        coord.y = coordinate.y;
-        coord.z = coordinate.z;
-    }
-
-    // Write all coordinates back to file
-    let writer =
-        File::create(&file_path).map_err(|e| format!("Failed to open file for writing: {}", e))?;
-
-    let mut csv_writer = Writer::from_writer(writer);
-
-    for coord in coordinates {
-        csv_writer
-            .serialize(coord)
-            .map_err(|e| format!("Failed to write record: {}", e))?;
-    }
-
-    csv_writer
-        .flush()
-        .map_err(|e| format!("Failed to flush writer: {}", e))?;
+    conn.execute(
+        "UPDATE bit_coordinates SET x = ?1, y = ?2, z = ?3 WHERE bit_id = ?4",
+        params![coordinate.x, coordinate.y, coordinate.z, coordinate.bit_id],
+    )
+        .map_err(|e| format!("Failed to update coordinates: {}", e))?;
 
     Ok(())
 }
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
